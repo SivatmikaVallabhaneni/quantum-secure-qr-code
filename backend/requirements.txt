@@ -1,0 +1,6 @@
+Flask
+flask-cors
+qiskit
+qiskit-aer
+pycryptodome
+gunicorn
