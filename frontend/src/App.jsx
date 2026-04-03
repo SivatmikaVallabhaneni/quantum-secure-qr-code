@@ -3,6 +3,7 @@ import { QRCodeCanvas } from "qrcode.react";
 import axios from "axios";
 import "./App.css";
 
+const API_URL = import.meta.env.VITE_API_URL;
 function App() {
   const [text, setText] = useState("");
   const [qrValue, setQrValue] = useState("");
@@ -23,8 +24,8 @@ function App() {
         return;
       }
 
-      const res = await axios.post("http://localhost:5000/generate-secure-qr", {
-        text: text,
+      const res = await axios.post(`${API_URL}/generate-secure-qr`, {
+                text: text,
       });
 
       const quantumKey = res.data.quantum_key;

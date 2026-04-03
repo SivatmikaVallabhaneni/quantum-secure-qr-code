@@ -2,6 +2,8 @@ import { useState } from "react";
 import axios from "axios";
 import "./App.css";
 
+const API_URL = import.meta.env.VITE_API_URL;
+
 function ScanDecrypt() {
   const [qrPayloadInput, setQrPayloadInput] = useState("");
   const [quantumKey, setQuantumKey] = useState("");
@@ -17,7 +19,7 @@ function ScanDecrypt() {
 
       const parsedPayload = JSON.parse(qrPayloadInput);
 
-      const res = await axios.post("http://localhost:5000/decrypt-secure-qr", {
+      const res = await axios.post(`${API_URL}/decrypt-secure-qr`, {
         qr_payload: parsedPayload,
         quantum_key: quantumKey,
       });
