@@ -11,6 +11,14 @@ import uuid
 app = Flask(__name__)
 CORS(app)
 
+# Plaintext character cap: AES-CBC + JSON wrapper must fit in one QR (model 40, byte mode ~2953 max).
+# Raised for higher-quality images; frontend matches this constant.
+# (A 1 MB file is allowed on upload, then scaled/encoded client-side to fit this cap.)
+MAX_PLAINTEXT_CHARS = 1800
+# Client may supply a key string (e.g. E91 sifted bits) instead of server-generated quantum random.
+MAX_QUANTUM_KEY_CHARS = 4096
+
+
 @app.route('/')
 def home():
     return "Quantum Secure QR Backend is Running!"
@@ -82,33 +90,77 @@ def decrypt_message(encrypted_data, quantum_key):
 
 # -----------------------------
 # Generate Secure QR Route
+# Accepts either { "text": "..." } or { "image_base64": "...", "mime_type": "image/jpeg" }
 # -----------------------------
 @app.route('/generate-secure-qr', methods=['POST'])
 def generate_secure_qr():
     data = request.get_json()
 
-    if not data or "text" not in data:
-        return jsonify({"error": "No text provided"}), 400
+    if not data:
+        return jsonify({"error": "No JSON body"}), 400
 
-    text = data["text"]
+    media_type = "text"
+    mime_type = None
+    text = None
 
-    if not text.strip():
-        return jsonify({"error": "Empty text"}), 400
+    if data.get("image_base64"):
+        media_type = "image"
+        mime_type = (data.get("mime_type") or "image/jpeg").strip()
+        raw = data["image_base64"]
+        if isinstance(raw, str) and raw.strip().startswith("data:") and "," in raw:
+            raw = raw.split(",", 1)[1]
+        text = raw.strip() if isinstance(raw, str) else ""
+    elif "text" in data:
+        text = data["text"]
+        if not isinstance(text, str):
+            return jsonify({"error": "text must be a string"}), 400
+    else:
+        return jsonify({"error": "Provide text or image_base64"}), 400
 
-    quantum_key = generate_quantum_key()
+    if not text or not str(text).strip():
+        return jsonify({"error": "Empty payload"}), 400
+
+    text = str(text)
+    if len(text) > MAX_PLAINTEXT_CHARS:
+        return jsonify({
+            "error": "Payload too large for QR capacity",
+            "max_chars": MAX_PLAINTEXT_CHARS,
+            "hint": "Use a smaller image or shorter text; images are auto-compressed in the app.",
+        }), 400
+
+    # Optional: key from client (simulated E91 / QKD output). Same string is required for decrypt.
+    raw_key = data.get("quantum_key")
+    if raw_key is not None and isinstance(raw_key, str) and raw_key.strip():
+        quantum_key = raw_key.strip()
+        if len(quantum_key) > MAX_QUANTUM_KEY_CHARS:
+            return jsonify({
+                "error": "quantum_key too long",
+                "max_chars": MAX_QUANTUM_KEY_CHARS,
+            }), 400
+        key_source = "client_e91"
+    else:
+        quantum_key = generate_quantum_key()
+        key_source = "server_qrng"
+
     session_id = generate_session_id()
     encrypted_result = encrypt_message(text, quantum_key)
 
     qr_payload = {
         "session_id": session_id,
-        "encrypted_data": encrypted_result
+        "encrypted_data": encrypted_result,
+        "media_type": media_type,
     }
+    if mime_type:
+        qr_payload["mime_type"] = mime_type
 
     return jsonify({
         "session_id": session_id,
         "quantum_key": quantum_key,
         "encrypted_data": encrypted_result,
-        "qr_payload": qr_payload
+        "qr_payload": qr_payload,
+        "media_type": media_type,
+        "mime_type": mime_type,
+        "key_source": key_source,
     })
 
 
@@ -129,16 +181,25 @@ def decrypt_secure_qr():
         encrypted_data = qr_payload["encrypted_data"]
         decrypted_text = decrypt_message(encrypted_data, quantum_key)
 
-        return jsonify({
+        media_type = qr_payload.get("media_type") or "text"
+        mime_type = qr_payload.get("mime_type")
+
+        out = {
             "decrypted_text": decrypted_text,
-            "session_id": qr_payload.get("session_id", "Unknown")
-        })
+            "session_id": qr_payload.get("session_id", "Unknown"),
+            "media_type": media_type,
+        }
+        if mime_type:
+            out["mime_type"] = mime_type
+
+        return jsonify(out)
 
     except Exception as e:
         return jsonify({
             "error": "Decryption failed. Invalid key or corrupted data.",
             "details": str(e)
         }), 400
+
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=True)
