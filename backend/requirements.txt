@@ -1,6 +1,8 @@
-Flask
+flask
 flask-cors
 qiskit
 qiskit-aer
-pycryptodome
 gunicorn
+qrcode
+pillow
+cryptography
